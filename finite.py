@@ -21,7 +21,7 @@ class NonUniformPeriodicGrid:
         x = np.zeros(len(values), dtype=float)
         for i in range(len(values)-1):
             x[i] = values[i+1]-values[i]
-        x[-1] = values[-1]-values[0]
+        x[-1] = -values[-1]+values[0]+length
         self.dx = x
 
 
@@ -120,7 +120,8 @@ class DifferenceNonUniformGrid:
         #extending h because it is periodic function
         h_1 = h[-conv:]
         h_2 = h[:conv]
-        h = np.concatenate(h_1, h, h_2)
+        
+        h = np.concatenate((h_1, h, h_2))
         
         # making difference matrix row by row
         D = np.zeros([self.grid.N, self.grid.N], dtype = float)
@@ -149,7 +150,7 @@ class DifferenceNonUniformGrid:
             for s in range(len(stencil)):
                 m = i + s - int((conv-1)/2)
                 if m >= self.grid.N:
-                    m = m - N
+                    m = m - self.grid.N
                 D[i, m] = stencil[s]
                 
         return D
