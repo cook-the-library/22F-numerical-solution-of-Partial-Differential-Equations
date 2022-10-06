@@ -180,7 +180,7 @@ class RationalPolynomial():
     def from_string(string):
         # consider rational coefficient
         string = string.replace(" ","")
-        string = string.split(")/(")
+        string = string.split("/(")
         for idx, x in enumerate(string):
             string[idx] = x.replace("(","")
             string[idx] = string[idx].replace(")","")
@@ -210,6 +210,11 @@ class RationalPolynomial():
         
         self.numerator = Polynomial.from_string(f)
         self.denominator = Polynomial.from_string(g)
+        
+        if self.denominator.coefficient[-1] < 0:
+            self.numerator *= Polynomial.from_string('-1')
+            self.denominator *= Polynomial.from_string('-1')
+        
         
 
     def __repr__(self):
