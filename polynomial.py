@@ -162,9 +162,8 @@ class Polynomial:
         return comp.all()
     
     def __truediv__(self, other):
-        numerator = self.coefficient
-        denominator = other.coefficient
-        return RationalPolynomial(numerator, denominator)
+        
+        return RationalPolynomial(self, other)
     
     
     
@@ -191,12 +190,15 @@ class RationalPolynomial():
     
     def _reduce(self): # finding greatest common factor of polynomials
         x = sympy.symbols("x")
+        
         f = str(self.numerator)
         g = str(self.denominator)
-        
+        print('f1 = ', f)
+        print('g1 = ', g)
         f = f.replace("^", "**")
         g = g.replace("^", "**")
-        
+        print('f = ', f)
+        print('g = ', g)
         f = sympy.parsing.sympy_parser.parse_expr(f)
         g = sympy.parsing.sympy_parser.parse_expr(g)
         
