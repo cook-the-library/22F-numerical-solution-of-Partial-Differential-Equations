@@ -160,6 +160,32 @@ class DifferenceNonUniformGrid:
     def __matmul__(self, other):
         return self.matrix() @ other
 
+class Difference:
+    def __matmul__(self, other):
+        return self.matrix @ other
+class ForwardFiniteDifference(Difference):
+    def __init__(self, grid):
+        h = grid.dx
+        N = grid.N
+        j = [0, 1]
+        diags = np.array([-1/h, 1/h])
+        matrix = sparse.diags(diags, offsets=j, shape=[N,N])
+        matrix = matrix.tocsr()
+        matrix[-1, 0] = 1/h
+        self.matrix = matrix
+class CenteredFiniteDifference(Difference):
+    def __init__(self, grid):
+        h = grid.dx
+        N = grid.N
+        j = [-1, 0, 1]
+        diags = np.array([-1/(2*h), 0, 1/(2*h)])
+        matrix = sparse.diags(diags, offsets=j, shape=[N,N])
+        matrix = matrix.tocsr()
+        matrix[-1, 0] = 1/(2*h)
+        matrix[0, -1] = -1/(2*h)
+        self.matrix = matrix
+    
+    
 class CenteredFiniteSecondDifference(Difference):
     def __init__(self, grid):
         h = grid.dx
