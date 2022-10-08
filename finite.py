@@ -107,6 +107,8 @@ class DifferenceNonUniformGrid:
         deri = self.derivative_order
         # where 1 located at b vector
         conv = self.convergence_order
+        if conv % 2 != 0:
+            conv += 1
         if deri % 2 ==0:
             deri_1 = deri -1
         else:
