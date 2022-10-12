@@ -1,4 +1,7 @@
 import numpy as np
+import scipy.sparse as sparse
+import sympy
+import math
 
 class Timestepper:
 
@@ -80,16 +83,38 @@ class Multistage(Timestepper):
             k_set[i] = self.func(self.u + dt*self.a[i,:]@k_set)
             a = self.func(self.u + dt*self.a[i,:]@k_set)
         return self.u + dt * self.b @ k_set
-       
-
-
 
 class AdamsBashforth(Timestepper):
 
     def __init__(self, u, f, steps, dt):
         super().__init__(u, f)
-        pass
+        self.steps = steps
+        self.dt = dt # constant
+
 
     def _step(self, dt):
-        pass
-
+        N = len(self.u)
+        A = sparse.diags(self._coefficient(self.steps), offsets=np.array(range(self.steps)), shape=[N, N])
+        A = A.tocsr()
+        for i in range(self.steps):
+            A[-i,-i:]=self._coefficient(i)
+        return self.u + A @ self.func(self.u)
+     
+    def _coefficient(self, stage):
+        stage = self.stage
+        coefficient = np.zeros(stage,dtype=float)
+        x = sympy.symbols('x')
+        f = "1"
+        for i in range(stage):
+            f +="*(x+{})".format(i)
+        f_old = f
+        for i in range(stage):
+            f = f_old
+            denominator = math.factorial(i)*math.factorial(stage-1-i)
+            f +="/(x+{})".format(i)
+            
+            f = sympy.parsing.sympy_parser.parse_expr(f)
+            a = sympy.integrate(f,(x,0,1))/denominator
+            coefficient[i] = (-1)**i*sympy.Float(a)
+        return coefficient
+        
