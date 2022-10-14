@@ -90,18 +90,31 @@ class AdamsBashforth(Timestepper):
         super().__init__(u, f)
         self.steps = steps
         self.dt = dt # constant
-
+        self.A = np.empty((0,self.u.size))
+        
 
     def _step(self, dt):
-        N = len(self.u)
-        A = sparse.diags(self._coefficient(self.steps), offsets=np.array(range(self.steps)), shape=[N, N])
-        A = A.tocsr()
-        for i in range(self.steps):
-            A[-i,-i:]=self._coefficient(i)
-        return self.u + A @ self.func(self.u)
+        
+        if self.iter+1 < self.steps:
+            stage = self.iter+1
+        else:
+            stage = self.steps
+
+        u_old = self.u
+        # A stores previous values of f(u)
+        
+        A = np.vstack([self.func(u_old), self.A]) 
+        
+        if A.shape[0] > self.steps:
+            A = np.delete(A,-1,0)
+        
+        self.A = A
+        
+        return self.u + dt*self._coefficient(stage) @ A
+    
      
     def _coefficient(self, stage):
-        stage = self.stage
+        self.stage = stage
         coefficient = np.zeros(stage,dtype=float)
         x = sympy.symbols('x')
         f = "1"
