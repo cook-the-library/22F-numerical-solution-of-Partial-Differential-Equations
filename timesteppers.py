@@ -91,6 +91,8 @@ class AdamsBashforth(Timestepper):
         self.steps = steps
         self.dt = dt # constant
         self.A = np.empty((0,self.u.size))
+        self.coefficient = np.array([])
+        self.stage_old = 0
         
 
     def _step(self, dt):
@@ -114,20 +116,25 @@ class AdamsBashforth(Timestepper):
     
      
     def _coefficient(self, stage):
-        self.stage = stage
-        coefficient = np.zeros(stage,dtype=float)
-        x = sympy.symbols('x')
-        f = "1"
-        for i in range(stage):
-            f +="*(x+{})".format(i)
-        f_old = f
-        for i in range(stage):
-            f = f_old
-            denominator = math.factorial(i)*math.factorial(stage-1-i)
-            f +="/(x+{})".format(i)
-            
-            f = sympy.parsing.sympy_parser.parse_expr(f)
-            a = sympy.integrate(f,(x,0,1))/denominator
-            coefficient[i] = (-1)**i*sympy.Float(a)
-        return coefficient
+        if stage == self.stage_old:
+            return self.coefficient
+        else:
+            self.stage_old = stage
+            self.stage = stage
+            coefficient = np.zeros(stage,dtype=float)
+            x = sympy.symbols('x')
+            f = "1"
+            for i in range(stage):
+                f +="*(x+{})".format(i)
+            f_old = f
+            for i in range(stage):
+                f = f_old
+                denominator = math.factorial(i)*math.factorial(stage-1-i)
+                f +="/(x+{})".format(i)
+
+                f = sympy.parsing.sympy_parser.parse_expr(f)
+                a = sympy.integrate(f,(x,0,1))/denominator
+                coefficient[i] = (-1)**i*sympy.Float(a)
+                self.coefficient = coefficient
+            return coefficient
         
