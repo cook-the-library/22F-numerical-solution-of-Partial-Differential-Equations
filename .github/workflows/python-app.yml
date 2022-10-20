@@ -35,3 +35,7 @@ jobs:
       if: always()
       run: |
         pytest hw3_tests2.py
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw4_tests1.py
