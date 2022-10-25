@@ -85,14 +85,14 @@ class SoundWave:
 class ReactionDiffusion:
     
     def __init__(self, c, d2, c_target, D):
-        self.u = u
-        self.X = StateVector([u])
+        self.c = c
+        self.X = StateVector([c])
         
         N = len(u)
         self.M = sparse.eye(N, N)
         self.L = -D*d2.matrix()
         
-        f = lambda X: X.data*(c - X.data)
+        f = lambda X: X.data*(c_target - X.data)
         
         self.F = f
 
