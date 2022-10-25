@@ -3,6 +3,8 @@ import scipy.sparse as sparse
 import sympy
 import math
 import scipy.sparse.linalg as spla
+from scipy.special import factorial
+from collections import deque
 
 class Timestepper:
 
@@ -254,5 +256,140 @@ class BackwardDifferentiationFormula(Timestepper):
         
         # a0 is u^n, so should consider at _step function
         return coefficient
+        
+class StateVector:
+    
+    def __init__(self, variables):
+        var0 = variables[0]
+        self.N = len(var0)
+        size = self.N*len(variables)
+        self.data = np.zeros(size)
+        self.variables = variables
+        self.gather()
+    def gather(self):
+        for i, var in enumerate(self.variables):
+            np.copyto(self.data[i*self.N:(i+1)*self.N], var)
+    def scatter(self):
+        for i, var in enumerate(self.variables):
+            np.copyto(var, self.data[i*self.N:(i+1)*self.N])   
+
+class IMEXTimestepper:
+    def __init__(self, eq_set):
+        self.t = 0
+        self.iter = 0
+        self.X = eq_set.X
+        self.M = eq_set.M
+        self.L = eq_set.L
+        self.F = eq_set.F
+        self.dt = None
+    def evolve(self, dt, time):
+        while self.t < time - 1e-8:
+            self.step(dt)
+    def step(self, dt):
+        self.X.data = self._step(dt)
+        self.X.scatter()
+        self.t += dt
+        self.iter += 1
+        
+class Euler(IMEXTimestepper):
+    def _step(self, dt):
+        if dt != self.dt:
+            LHS = self.M + dt*self.L
+            self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+        self.dt = dt
+        
+        RHS = self.M @ self.X.data + dt*self.F(self.X)
+        return self.LU.solve(RHS)
+    
+class CNAB(IMEXTimestepper):
+    def _step(self, dt):
+        if self.iter == 0:
+            # Euler
+            LHS = self.M + dt*self.L
+            LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+            self.FX = self.F(self.X)
+            RHS = self.M @ self.X.data + dt*self.FX
+            self.FX_old = self.FX
+            return LU.solve(RHS)
+        else:
+            if dt != self.dt:
+                LHS = self.M + dt/2*self.L
+                self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+            self.dt = dt
+            self.FX = self.F(self.X)
+            RHS = self.M @ self.X.data - 0.5*dt*self.L @ self.X.data +3/2*dt*self.FX - 1/2*dt*self.FX_old
+            self.FX_old = self.FX
+            return self.LU.solve(RHS)
+    
+class BDFExtrapolate(IMEXTimestepper):
+    def __init__(self, eq_set, steps):
+        super().__init__(eq_set)
+        self.steps = steps
+        self.steps_old_ex = 0
+        self.steps_old_im = 0
+        
+        self.X_old = np.empty((0,self.X.data.size))
+        self.FX_old =np.empty((0,self.X.data.size))
+        
+    def _step(self, dt):
+        # define steps for inital stages
+        if self.iter+1 < self.steps:
+            steps = self.iter+1
+        else:
+            steps = self.steps
+           
+        # X_old stores previous values of X as row vector
+        # new X^n-1 at top
+        X_old = np.vstack([self.X.data, self.X_old]) 
+        # delete old X if longer than self.steps
+        if X_old.shape[0] > self.steps:
+            X_old = np.delete(X_old,-1,0)
+        self.X_old = X_old
+        
+        
+        # FX_old stores previous values of FX as row vector
+        # new FX^n-1 at top
+        FX_old = np.vstack([self.F(self.X).data, self.FX_old]) 
+        # delete old F if longer than self.steps
+        if FX_old.shape[0] > self.steps:
+            FX_old = np.delete(FX_old,-1,0)
+        self.FX_old = FX_old 
+        
+        # calculate matrix
+        if self.steps_old_im != steps:
+            LHS = self.M*self._coeff_im(steps, dt)[0][0] + self.L
+            self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+        RHS = -self.M*(self._coeff_im(steps, dt)[1:] * self.X_old).sum(axis = 0) + (self._coeff_ex(steps, dt) * self.FX_old).sum(axis = 0)
+        return self.LU.solve(RHS)
+    
+    def _coeff_ex(self, steps, dt):
+        if self.steps_old_ex == steps:
+            return self.coeff_ex
+        else:
+            self.steps_old_ex = steps
+            i = (1 + np.arange(steps))[None, :]
+            j = (1 + np.arange(steps))[:, None]
+            S = (-i*dt)**(j-1)/factorial(j-1)
+            b = 0*j
+            b[0] = 1
+            self.coeff_ex = np.linalg.solve(S, b)
+            # self.coeff_ex is (steps,1) vector, first element to X^n-1
+            return self.coeff_ex
+        
+    def _coeff_im(self, steps, dt):
+        if self.steps_old_im == steps:
+            return self.coeff_im
+        else:
+            self.steps_old_im = steps
+            i = (np.arange(steps+1))[None, :]
+            j = (1 + np.arange(steps+1))[:, None]
+            S = (-i*dt)**(j-1)/factorial(j-1)
+            b = 0*j
+            b[1] = 1
+            self.coeff_im = np.linalg.solve(S, b)
+            self.coeff_im = self.coeff_im
+            # self.coeff_im is (steps+1,1) vector, first element to X^n
+            return self.coeff_im
+        
         
         
