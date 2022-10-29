@@ -4,8 +4,6 @@ import scipy.sparse.linalg as spla
 from scipy.special import factorial
 from collections import deque
 from array import axslice, apply_matrix
-import sympy
-import math
 
 class StateVector:
 
@@ -31,9 +29,11 @@ class StateVector:
 
 class Timestepper:
 
-    def __init__(self):
+    def __init__(self, u, f):
         self.t = 0
         self.iter = 0
+        self.u = u
+        self.func = f
         self.dt = None
 
     def step(self, dt):
@@ -438,7 +438,4 @@ class BDFExtrapolate(IMEXTimestepper):
             self.coeff_im = self.coeff_im
             # self.coeff_im is (steps+1,1) vector, first element to X^n
             return self.coeff_im
-        
-        
-        
 
