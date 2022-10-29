@@ -27,6 +27,43 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw1_tests1.py
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw1_tests2.py
+        
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw2_test1.py
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw2_test2.py
+        
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw3_tests1.py
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw3_tests2.py
+        
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw4_test1.py
+    - name: Test script with pytest
+      if: always()
+      run: |
+        pytest hw4_test2.py
+    
     - name: Test script with pytest
       if: always()
       run: |
