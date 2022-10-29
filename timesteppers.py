@@ -4,6 +4,7 @@ import scipy.sparse.linalg as spla
 from scipy.special import factorial
 from collections import deque
 from array import axslice, apply_matrix
+import math
 
 class StateVector:
 
@@ -29,11 +30,9 @@ class StateVector:
 
 class Timestepper:
 
-    def __init__(self, u, f):
+    def __init__(self):
         self.t = 0
         self.iter = 0
-        self.u = u
-        self.func = f
         self.dt = None
 
     def step(self, dt):
@@ -223,11 +222,13 @@ class CrankNicolson(ImplicitTimestepper):
 
 class BackwardDifferentiationFormula(Timestepper):
     def __init__(self, u, L_op, steps):
-        super().__init__(u, L_op)
+        super().__init__()
+        self.X = StateVector([u])
+        self.func = L_op
         N = len(u)
         self.I = sparse.eye(N, N)
         self.steps = steps
-        self.A = np.empty((0,self.u.size))
+        self.A = np.empty((0,u.size))
         
         # stores previous time steps
         self.dt_series = np.array([])
@@ -269,7 +270,7 @@ class BackwardDifferentiationFormula(Timestepper):
         # have coefficient by now, need previous u
         # A stores previous values of u
         # new u at top
-        u_old = self.u
+        u_old = self.X.data
         A = np.vstack([u_old, self.A]) 
         # delete old u if longer than self.steps
         if A.shape[0] > self.steps:
@@ -283,12 +284,9 @@ class BackwardDifferentiationFormula(Timestepper):
         # get u^n from inverse matrix
         # multiply coeff[0] to u^n
         # dt already divided at the coefficients
-        LHS = self.func.matrix() - self.I * coefficient[0]
+        LHS = self.func.matrix - self.I * coefficient[0]
         self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
-        
-        print("dt pack : ", self.dt_pack)
-        print("coeff pack : ", self.coefficient_pack)
-        
+                
         return self.LU.solve(RHS)
         
     def _coefficient(self, steps, dt_series):
