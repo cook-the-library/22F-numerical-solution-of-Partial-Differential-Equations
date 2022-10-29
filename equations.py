@@ -1,6 +1,7 @@
-from timesteppers import StateVector
-from scipy import sparse
 import numpy as np
+from scipy import sparse
+from timesteppers import StateVector, CrankNicolson, RK22
+import finite
 
 class ViscousBurgers:
     
@@ -96,3 +97,16 @@ class ReactionDiffusion:
         
         self.F = f
 
+        
+        
+class ReactionDiffusion2D:
+    def __init__(self, c, D, dx2, dy2):
+        pass
+    def step(self, dt):
+        pass
+    
+class ViscousBurgers2D:
+    def __init__(self, u, v, nu, spatial_order, domain):
+        pass
+    def step(self, dt):
+        pass      

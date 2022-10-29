@@ -5,6 +5,7 @@ import math
 import scipy.sparse.linalg as spla
 from scipy.special import factorial
 from collections import deque
+from array import axslice, apply_matrix
 
 class Timestepper:
 
@@ -16,7 +17,9 @@ class Timestepper:
         self.dt = None
 
     def step(self, dt):
-        self.u = self._step(dt)
+        self.X.gather()
+        self.X.data = self._step(dt)
+        self.X.scatter()
         self.t += dt
         self.iter += 1
         
@@ -24,18 +27,23 @@ class Timestepper:
         while self.t < time - 1e-8:
             self.step(dt)
 
-
-class ForwardEuler(Timestepper):
+class ExplicitTimestepper(Timestepper):
+    def __init__(self, eq_set):
+        super().__init__()
+        self.X = eq_set.X
+        self.F = eq_set.F
+            
+class ForwardEuler(ExplicitTimestepper):
 
     def _step(self, dt):
-        return self.u + dt*self.func(self.u)
+        return self.X.data + dt*self.F(self.X)
 
 
-class LaxFriedrichs(Timestepper):
+class LaxFriedrichs(ExplicitTimestepper):
 
-    def __init__(self, u, f):
-        super().__init__(u, f)
-        N = len(u)
+    def __init__(self, eq_set):
+        super().__init__(eq_set)
+        N = len(X.data)
         A = sparse.diags([1/2, 1/2], offsets=[-1, 1], shape=[N, N])
         A = A.tocsr()
         A[0, -1] = 1/2
@@ -43,130 +51,125 @@ class LaxFriedrichs(Timestepper):
         self.A = A
 
     def _step(self, dt):
-        return self.A @ self.u + dt*self.func(self.u)
+        return self.A @ self.X.data + dt*self.F(self.X)
 
 
-class Leapfrog(Timestepper):
-
+class Leapfrog(ExplicitTimestepper):
     def _step(self, dt):
         if self.iter == 0:
-            self.u_old = np.copy(self.u)
-            return self.u + dt*self.func(self.u)
+            self.X_old = np.copy(self.X.data)
+            return self.X.data + dt*self.F(self.X)
         else:
-            u_temp = self.u_old + 2*dt*self.func(self.u)
-            self.u_old = np.copy(self.u)
-            return u_temp
+            X_temp = self.X_old + 2*dt*self.F(self.X)
+            self.X_old = np.copy(self.X)
+            return X_temp
 
 
-class LaxWendroff(Timestepper):
-
-    def __init__(self, u, func1, func2):
+class LaxWendroff(ExplicitTimestepper):
+    def __init__(self, X, F1, F2):
         self.t = 0
         self.iter = 0
-        self.u = u
-        self.f1 = func1
-        self.f2 = func2
-
+        self.X = X
+        self.F1 = F1
+        self.F2 = F2
     def _step(self, dt):
-        return self.u + dt*self.f1(self.u) + dt**2/2*self.f2(self.u)
+        return self.X.data + dt*self.F1(self.X) + dt**2/2*self.F2(self.X)
 
-
-class Multistage(Timestepper):
-
-    def __init__(self, u, f, stages, a, b):
-        super().__init__(u, f)
+class Multistage(ExplicitTimestepper):
+    def __init__(self, eq_set, stages, a, b):
+        super().__init__(eq_set)
         self.stages = stages
         self.a = a
         self.b = b
-        
-
+        self.X_list = []
+        self.K_list = []
+        for i in range(self.stages):
+            self.X_list.append(StateVector([np.copy(var) for var in 
+self.X.variables]))
+            self.K_list.append(np.copy(self.X.data))
     def _step(self, dt):
-        k_set = np.zeros(shape = (self.stages, len(self.u)), dtype = float)
-        for i in range(len(k_set)):
-            k_set[i] = self.func(self.u + dt*self.a[i,:]@k_set)
-            a = self.func(self.u + dt*self.a[i,:]@k_set)
-        return self.u + dt * self.b @ k_set
+        X = self.X
+        X_list = self.X_list
+        K_list = self.K_list
+        stages = self.stages
+        np.copyto(X_list[0].data, X.data)
+        for i in range(1, stages):
+            K_list[i-1] = self.F(X_list[i-1])
+            np.copyto(X_list[i].data, X.data)
+            # this loop is slow -- should make K_list a 2D array
+            for j in range(i):
+                X_list[i].data += self.a[i, j]*dt*K_list[j]
+        K_list[-1] = self.F(X_list[-1])
+        # this loop is slow -- should make K_list a 2D array
+        for i in range(stages):
+            X.data += self.b[i]*dt*K_list[i]
+        return X.data
 
-class AdamsBashforth(Timestepper):
+def RK22(eq_set):
+    a = np.array([[  0,   0],
+                  [1/2,   0]])
+    b = np.array([0, 1])
+    return Multistage(eq_set, 2, a, b)    
 
-    def __init__(self, u, f, steps, dt):
-        super().__init__(u, f)
+class AdamsBashforth(ExplicitTimestepper):
+    def __init__(self, eq_set, steps, dt):
+        super().__init__(eq_set)
         self.steps = steps
-        self.dt = dt # constant
-        self.A = np.empty((0,self.u.size))
-        self.coefficient = np.array([])
-        self.stage_old = 0
-        
-
+        self.dt = dt
+        self.f_list = deque()
+        for i in range(self.steps):
+            self.f_list.append(np.copy(X.data))
     def _step(self, dt):
-        
-        if self.iter+1 < self.steps:
-            stage = self.iter+1
+        f_list = self.f_list
+        f_list.rotate()
+        f_list[0] = self.F(self.X)
+        if self.iter < self.steps:
+            coeffs = self._coeffs(self.iter+1)
         else:
-            stage = self.steps
+            coeffs = self._coeffs(self.steps)
+        for i, coeff in enumerate(coeffs):
+            self.X.data += self.dt*coeff*self.f_list[i].data
+        return self.X.data
+    def _coeffs(self, num):
+        i = (1 + np.arange(num))[None, :]
+        j = (1 + np.arange(num))[:, None]
+        S = (-i)**(j-1)/factorial(j-1)
+        b = (-1)**(j+1)/factorial(j)
+        a = np.linalg.solve(S, b)
+        return a
 
-        u_old = self.u
-        # A stores previous values of f(u)
-        
-        A = np.vstack([self.func(u_old), self.A]) 
-        
-        if A.shape[0] > self.steps:
-            A = np.delete(A,-1,0)
-        
-        self.A = A
-        
-        return self.u + dt*self._coefficient(stage) @ A
+class ImplicitTimestepper(Timestepper):
+    def __init__(self, eq_set, axis):
+        super().__init__()
+        self.axis = axis
+        self.X = eq_set.X
+        self.M = eq_set.M
+        self.L = eq_set.L
+    def _LUsolve(self, data):
+        if self.axis == 0:
+            return self.LU.solve(data)
+        elif self.axis == len(data.shape)-1:
+            return self.LU.solve(data.T).T
+        else:
+            raise ValueError("Can only do implicit timestepping on first or last 
+axis")
     
-     
-    def _coefficient(self, stage):
-        if stage == self.stage_old:
-            return self.coefficient
-        else:
-            self.stage_old = stage
-            self.stage = stage
-            coefficient = np.zeros(stage,dtype=float)
-            x = sympy.symbols('x')
-            f = "1"
-            for i in range(stage):
-                f +="*(x+{})".format(i)
-            f_old = f
-            for i in range(stage):
-                f = f_old
-                denominator = math.factorial(i)*math.factorial(stage-1-i)
-                f +="/(x+{})".format(i)
-
-                f = sympy.parsing.sympy_parser.parse_expr(f)
-                a = sympy.integrate(f,(x,0,1))/denominator
-                coefficient[i] = (-1)**i*sympy.Float(a)
-                self.coefficient = coefficient
-            return coefficient
-        
-class BackwardEuler(Timestepper):
-    def __init__(self, u, L):
-        super().__init__(u, L)
-        N = len(u)
-        self.I = sparse.eye(N, N)
+class BackwardEuler(ImplicitTimestepper):
     def _step(self, dt):
         if dt != self.dt:
-            self.LHS = self.I - dt*self.func.matrix
-            print(self.func.matrix.dtype)
-            print(self.func)
+            self.LHS = self.M + dt*self.L
             self.LU = spla.splu(self.LHS.tocsc(), permc_spec='NATURAL')
         self.dt = dt
-        return self.LU.solve(self.u)
-    
-class CrankNicolson(Timestepper):
-    def __init__(self, u, L_op):
-        super().__init__(u, L_op)
-        N = len(u)
-        self.I = sparse.eye(N, N)
+        return self._LUsolve(self.X.data)
+class CrankNicolson(ImplicitTimestepper):
     def _step(self, dt):
         if dt != self.dt:
-            self.LHS = self.I - dt/2*self.func.matrix
-            self.RHS = self.I + dt/2*self.func.matrix
+            self.LHS = self.M + dt/2*self.L
+            self.RHS = self.M - dt/2*self.L
             self.LU = spla.splu(self.LHS.tocsc(), permc_spec='NATURAL')
         self.dt = dt
-        return self.LU.solve(self.RHS @ self.u)
+        return self._LUsolve(apply_matrix(self.RHS, self.X.data, self.axis))
+
     
 class BackwardDifferentiationFormula(Timestepper):
     def __init__(self, u, L_op, steps):
@@ -259,19 +262,23 @@ class BackwardDifferentiationFormula(Timestepper):
         
 class StateVector:
     
-    def __init__(self, variables):
+    def __init__(self, variables, axis=0):
+        self.axis = axis
         var0 = variables[0]
-        self.N = len(var0)
-        size = self.N*len(variables)
-        self.data = np.zeros(size)
+        shape = list(var0.shape)
+        self.N = shape[axis]
+        shape[axis] *= len(variables)
+        self.shape = tuple(shape)
+        self.data = np.zeros(shape)
         self.variables = variables
         self.gather()
+        
     def gather(self):
         for i, var in enumerate(self.variables):
-            np.copyto(self.data[i*self.N:(i+1)*self.N], var)
+            np.copyto(self.data[axslice(self.axis, i*self.N, (i+1)*self.N)], var)
     def scatter(self):
         for i, var in enumerate(self.variables):
-            np.copyto(var, self.data[i*self.N:(i+1)*self.N])   
+            np.copyto(var, self.data[axslice(self.axis, i*self.N, (i+1)*self.N)])  
 
 class IMEXTimestepper:
     def __init__(self, eq_set):
@@ -320,7 +327,10 @@ class CNAB(IMEXTimestepper):
             RHS = self.M @ self.X.data - 0.5*dt*self.L @ self.X.data +3/2*dt*self.FX - 1/2*dt*self.FX_old
             self.FX_old = self.FX
             return self.LU.solve(RHS)
-    
+
+        
+        
+        
 class BDFExtrapolate(IMEXTimestepper):
     def __init__(self, eq_set, steps):
         super().__init__(eq_set)
