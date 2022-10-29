@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.special import factorial
 from scipy import sparse
-from array import reshape_vector
+from array import reshape_vector, apply_matrix
 
 class UniformPeriodicGrid:
 
