@@ -3,7 +3,7 @@ import scipy.sparse as sparse
 import scipy.sparse.linalg as spla
 from scipy.special import factorial
 from collections import deque
-from array import axslice, apply_matrix
+from _array import axslice, apply_matrix
 
 class StateVector:
 
