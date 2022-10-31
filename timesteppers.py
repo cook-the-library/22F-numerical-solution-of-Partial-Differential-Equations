@@ -222,10 +222,91 @@ class CrankNicolson(ImplicitTimestepper):
 class BackwardDifferentiationFormula(Timestepper):
 
     def __init__(self, u, L_op, steps):
-        pass
-
+        super().__init__()
+        self.X = StateVector([u])
+        self.func = L_op
+        N = len(u)
+        self.I = sparse.eye(N, N)
+        self.steps = steps
+        self.A = np.empty((0,u.size))
+        
+        # stores previous time steps
+        self.dt_series = np.array([])
+        
+        # list of numpy for nonuniform time steps
+        self.dt_pack = []
+        
+        # dictionary not possible, so store in same order as list
+        self.coefficient_pack = []
+        
     def _step(self, dt):
-        pass
+        # define steps for inital stages
+        if self.iter+1 < self.steps:
+            steps = self.iter+1
+        else:
+            steps = self.steps
+            
+        # new dt at dt_series[0], oldest at [-1]
+        self.dt_series = np.append(dt, self.dt_series)
+        # deleting oldest dt if longer than stage
+        if len(self.dt_series) > self.steps:   
+            self.dt_series = self.dt_series[:-1]    
+        
+        # check whether self.dt_series is new
+        boolean_1 = np.array([], dtype=bool)
+        
+        for i in self.dt_pack:
+            boolean_1 = np.append(boolean_1, np.array_equal(i, self.dt_series))
+        boolean_2 = boolean_1.any()
+        # add into dt_pack if new and calculate coefficient
+        if not boolean_2:
+            self.dt_pack.append(self.dt_series)
+            coefficient = self._coefficient(steps, self.dt_series)
+            self.coefficient_pack.append(coefficient)
+        else:   
+        # ["foo", "bar", "baz"].index("bar")
+            index_ = np.where(boolean_1)[0]
+            coefficient = self.coefficient_pack[index_[0]]
+        # have coefficient by now, need previous u
+        # A stores previous values of u
+        # new u at top
+        u_old = self.X.data
+        A = np.vstack([u_old, self.A]) 
+        # delete old u if longer than self.steps
+        if A.shape[0] > self.steps:
+            A = np.delete(A,-1,0)
+        self.A = A
+
+        # store as matrix and call as vector
+        # multiply coeff to u^n-1, ...
+        RHS = (A * coefficient[1:, np.newaxis]).sum(axis = 0)
+        
+        # get u^n from inverse matrix
+        # multiply coeff[0] to u^n
+        # dt already divided at the coefficients
+        LHS = self.func.matrix - self.I * coefficient[0]
+        self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+                
+        return self.LU.solve(RHS)
+        
+    def _coefficient(self, steps, dt_series):
+        # already checked whether dt_series are same & # of steps
+        coefficient = np.zeros(steps+1, dtype=float)
+        differentiation = np.zeros(steps+1, dtype = float)
+        differentiation[1] = 1
+        
+        # matrix for differ. = matrix dot coeff.
+        matrix = np.zeros([steps+1, steps+1], dtype = float)
+        matrix[0,:] = 1
+        
+        for i in range(1, steps+1):
+            for j in range(1, steps+1):
+                matrix[i,j] = (-dt_series[:j].sum())**i/math.factorial(i)
+        # get coefficient from inverse matrix
+        coefficient = np.linalg.inv(matrix) @ differentiation 
+        
+        # a0 is u^n, so should consider at _step function
+        return coefficient
 
 
 class IMEXTimestepper:
@@ -291,8 +372,69 @@ class BDFExtrapolate(IMEXTimestepper):
     def __init__(self, eq_set, steps):
         super().__init__(eq_set)
         self.steps = steps
-        pass
-
+        self.steps_old_ex = 0
+        self.steps_old_im = 0
+        
+        self.X_old = np.empty((0,self.X.data.size))
+        self.FX_old =np.empty((0,self.X.data.size))
+        
     def _step(self, dt):
-        pass
+        # define steps for inital stages
+        if self.iter+1 < self.steps:
+            steps = self.iter+1
+        else:
+            steps = self.steps
+           
+        # X_old stores previous values of X as row vector
+        # new X^n-1 at top
+        X_old = np.vstack([self.X.data, self.X_old]) 
+        # delete old X if longer than self.steps
+        if X_old.shape[0] > self.steps:
+            X_old = np.delete(X_old,-1,0)
+        self.X_old = X_old
+        
+        
+        # FX_old stores previous values of FX as row vector
+        # new FX^n-1 at top
+        FX_old = np.vstack([self.F(self.X).data, self.FX_old]) 
+        # delete old F if longer than self.steps
+        if FX_old.shape[0] > self.steps:
+            FX_old = np.delete(FX_old,-1,0)
+        self.FX_old = FX_old 
+        
+        # calculate matrix
+        if self.steps_old_im != steps:
+            LHS = self.M*self._coeff_im(steps, dt)[0][0] + self.L
+            self.LU = spla.splu(LHS.tocsc(), permc_spec='NATURAL')
+        RHS = -self.M*(self._coeff_im(steps, dt)[1:] * self.X_old).sum(axis = 0) + (self._coeff_ex(steps, dt) * self.FX_old).sum(axis = 0)
+        return self.LU.solve(RHS)
+    
+    def _coeff_ex(self, steps, dt):
+        if self.steps_old_ex == steps:
+            return self.coeff_ex
+        else:
+            self.steps_old_ex = steps
+            i = (1 + np.arange(steps))[None, :]
+            j = (1 + np.arange(steps))[:, None]
+            S = (-i*dt)**(j-1)/factorial(j-1)
+            b = 0*j
+            b[0] = 1
+            self.coeff_ex = np.linalg.solve(S, b)
+            # self.coeff_ex is (steps,1) vector, first element to X^n-1
+            return self.coeff_ex
+        
+    def _coeff_im(self, steps, dt):
+        if self.steps_old_im == steps:
+            return self.coeff_im
+        else:
+            self.steps_old_im = steps
+            i = (np.arange(steps+1))[None, :]
+            j = (1 + np.arange(steps+1))[:, None]
+            S = (-i*dt)**(j-1)/factorial(j-1)
+            b = 0*j
+            b[1] = 1
+            self.coeff_im = np.linalg.solve(S, b)
+            self.coeff_im = self.coeff_im
+            # self.coeff_im is (steps+1,1) vector, first element to X^n
+            return self.coeff_im
 
